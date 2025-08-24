@@ -1,11 +1,14 @@
 fastapi==0.109.1
 uvicorn[standard]==0.24.0
 instagrapi==2.0.0
-pydantic==2.5.0
+pydantic==2.11.7
 python-multipart==0.0.19
 python-jose[cryptography]==3.4.0
 passlib[bcrypt]==1.7.4
 python-dotenv==1.0.0
 Pillow>=8.1.1
-requests>=2.31.0
 httpx>=0.25.0
+requests==2.32.4
+PySocks==1.7.1
+moviepy==1.0.3
+pycryptodomex==3.23.0
