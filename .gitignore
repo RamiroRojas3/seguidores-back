@@ -1,0 +1,135 @@
+# === PYTHON ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# === VIRTUAL ENVIRONMENTS ===
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# === IDES ===
+# PyCharm
+.idea/
+*.swp
+*.swo
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# === LOGS ===
+*.log
+logs/
+secure_instagram.log
+instagram_backend.log
+
+# === DATABASE ===
+*.db
+*.sqlite
+*.sqlite3
+secure_data/
+sessions/
+
+# === OS ===
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# === TESTING ===
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# === JUPYTER ===
+.ipynb_checkpoints
+
+# === RAILWAY SPECIFIC ===
+# Railway no necesita estos archivos
+dockerfile
+docker-compose.yml
+
+# === SECURITY ===
+# No subir credenciales
+config.ini
+secrets.json
+*.key
+*.pem
+*.p12
+*.pfx
+
+# === BACKUP FILES ===
+*.bak
+*.backup
+*.old
+*.orig
+*.tmp
+
+# === PYTHON SPECIFIC ===
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
