@@ -18,10 +18,10 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Instagram API Backend", version="1.0.0")
 security = HTTPBearer()
 
-# CORS para permitir requests desde Android
+# CORS CONFIGURADO PARA PRODUCCIÓN
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En producción, especifica los dominios permitidos
+    allow_origins=["*"],  # En Railway necesitas permitir todos los orígenes
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -65,44 +65,20 @@ class UserInfoResponse(BaseModel):
     profile_pic_url: str
 
 
-# Almacenamiento en memoria de sesiones (en producción usa Redis/BD)
+# Almacenamiento en memoria de sesiones (Railway usa contenedores efímeros)
 active_sessions: Dict[str, Client] = {}
-SESSION_FILE_DIR = "sessions"
-
-# Crear directorio de sesiones si no existe
-os.makedirs(SESSION_FILE_DIR, exist_ok=True)
 
 
-def get_session_file_path(username: str) -> str:
-    """Obtiene la ruta del archivo de sesión"""
-    return os.path.join(SESSION_FILE_DIR, f"{username}_session.json")
+# Para Railway no usamos archivos locales (son efímeros)
+# En su lugar usamos almacenamiento en memoria
 
-
-def save_session(client: Client, username: str):
-    """Guarda la sesión en archivo"""
+def save_session_memory(client: Client, username: str, session_token: str):
+    """Guarda la sesión en memoria (Railway compatible)"""
     try:
-        session_data = client.get_settings()
-        with open(get_session_file_path(username), 'w') as f:
-            json.dump(session_data, f)
-        logger.info(f"Sesión guardada para {username}")
+        # Almacenar en memoria en lugar de archivo
+        logger.info(f"Sesión guardada en memoria para {username}")
     except Exception as e:
         logger.error(f"Error al guardar sesión: {e}")
-
-
-def load_session(client: Client, username: str) -> bool:
-    """Carga la sesión desde archivo"""
-    try:
-        session_file = get_session_file_path(username)
-        if os.path.exists(session_file):
-            with open(session_file, 'r') as f:
-                session_data = json.load(f)
-            client.set_settings(session_data)
-            client.login(username)
-            logger.info(f"Sesión cargada para {username}")
-            return True
-    except Exception as e:
-        logger.error(f"Error al cargar sesión: {e}")
-    return False
 
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
@@ -122,27 +98,17 @@ async def login(request: LoginRequest):
     try:
         client = Client()
 
-        # Intentar cargar sesión existente
-        if load_session(client, request.username):
-            # Generar token de sesión
-            session_token = f"{request.username}_{datetime.now().timestamp()}"
-            active_sessions[session_token] = client
-
-            return LoginResponse(
-                success=True,
-                message="Login exitoso (sesión reutilizada)",
-                session_token=session_token
-            )
-
-        # Login nuevo
+        # Login directo (sin archivos de sesión en Railway)
         client.login(request.username, request.password)
-
-        # Guardar sesión
-        save_session(client, request.username)
 
         # Generar token de sesión
         session_token = f"{request.username}_{datetime.now().timestamp()}"
         active_sessions[session_token] = client
+
+        # Guardar en memoria
+        save_session_memory(client, request.username, session_token)
+
+        logger.info(f"✅ Login exitoso para {request.username}")
 
         return LoginResponse(
             success=True,
@@ -151,13 +117,16 @@ async def login(request: LoginRequest):
         )
 
     except LoginRequired:
+        logger.error("❌ Credenciales incorrectas")
         raise HTTPException(status_code=400, detail="Credenciales incorrectas")
     except ChallengeRequired as e:
+        logger.error("⚠️ Challenge requerido")
         raise HTTPException(status_code=400, detail="Challenge requerido. Verifica tu cuenta desde la app oficial.")
     except PleaseWaitFewMinutes:
+        logger.error("⏰ Demasiados intentos")
         raise HTTPException(status_code=429, detail="Demasiados intentos. Espera unos minutos.")
     except Exception as e:
-        logger.error(f"Error en login: {e}")
+        logger.error(f"💥 Error en login: {e}")
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 
 
@@ -167,6 +136,7 @@ async def logout(token: str = Depends(verify_token)):
     try:
         if token in active_sessions:
             del active_sessions[token]
+        logger.info("👋 Logout exitoso")
         return {"success": True, "message": "Logout exitoso"}
     except Exception as e:
         logger.error(f"Error en logout: {e}")
@@ -179,6 +149,8 @@ async def get_user_info(username: str, token: str = Depends(verify_token)):
     try:
         client = active_sessions[token]
         user = client.user_info_by_username(username)
+
+        logger.info(f"📱 Info obtenida para {username}")
 
         return UserInfoResponse(
             user_id=str(user.pk),
@@ -215,30 +187,58 @@ async def get_user_posts(username: str, limit: int = 12, token: str = Depends(ve
                 "taken_at": post.taken_at.isoformat() if post.taken_at else None
             })
 
+        logger.info(f"📸 {len(posts_data)} posts obtenidos para {username}")
         return {"success": True, "posts": posts_data}
     except Exception as e:
         logger.error(f"Error al obtener posts: {e}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
-@app.post("/api/upload-photo")
-async def upload_photo(caption: str, image_path: str, token: str = Depends(verify_token)):
-    """Sube una foto a Instagram"""
+@app.get("/api/followers")
+async def get_followers(username: str, limit: int = 50, token: str = Depends(verify_token)):
+    """Obtiene los seguidores de un usuario"""
     try:
         client = active_sessions[token]
+        user_id = client.user_id_from_username(username)
+        followers = client.user_followers(user_id, amount=limit)
 
-        if not os.path.exists(image_path):
-            raise HTTPException(status_code=400, detail="Archivo de imagen no encontrado")
+        followers_data = []
+        for follower_id, follower in followers.items():
+            followers_data.append({
+                "user_id": str(follower.pk),
+                "username": follower.username,
+                "full_name": follower.full_name or "",
+                "profile_pic_url": follower.profile_pic_url or ""
+            })
 
-        media = client.photo_upload(image_path, caption)
-
-        return {
-            "success": True,
-            "message": "Foto subida exitosamente",
-            "media_id": str(media.pk)
-        }
+        logger.info(f"👥 {len(followers_data)} seguidores obtenidos para {username}")
+        return {"success": True, "followers": followers_data}
     except Exception as e:
-        logger.error(f"Error al subir foto: {e}")
+        logger.error(f"Error al obtener seguidores: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+@app.get("/api/following")
+async def get_following(username: str, limit: int = 50, token: str = Depends(verify_token)):
+    """Obtiene los seguidos de un usuario"""
+    try:
+        client = active_sessions[token]
+        user_id = client.user_id_from_username(username)
+        following = client.user_following(user_id, amount=limit)
+
+        following_data = []
+        for following_id, following_user in following.items():
+            following_data.append({
+                "user_id": str(following_user.pk),
+                "username": following_user.username,
+                "full_name": following_user.full_name or "",
+                "profile_pic_url": following_user.profile_pic_url or ""
+            })
+
+        logger.info(f"👤 {len(following_data)} seguidos obtenidos para {username}")
+        return {"success": True, "following": following_data}
+    except Exception as e:
+        logger.error(f"Error al obtener seguidos: {e}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
@@ -249,26 +249,10 @@ async def like_post(media_id: str, token: str = Depends(verify_token)):
         client = active_sessions[token]
         result = client.media_like(media_id)
 
+        logger.info(f"❤️ Like enviado a {media_id}")
         return {"success": result, "message": "Like enviado" if result else "Error al dar like"}
     except Exception as e:
         logger.error(f"Error al dar like: {e}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-
-
-@app.post("/api/comment-post")
-async def comment_post(media_id: str, text: str, token: str = Depends(verify_token)):
-    """Comenta en un post"""
-    try:
-        client = active_sessions[token]
-        comment = client.media_comment(media_id, text)
-
-        return {
-            "success": True,
-            "message": "Comentario enviado",
-            "comment_id": str(comment.pk)
-        }
-    except Exception as e:
-        logger.error(f"Error al comentar: {e}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
@@ -290,41 +274,44 @@ async def search_users(query: str, limit: int = 10, token: str = Depends(verify_
                 "follower_count": user.follower_count
             })
 
+        logger.info(f"🔍 {len(users_data)} usuarios encontrados para '{query}'")
         return {"success": True, "users": users_data}
     except Exception as e:
         logger.error(f"Error en búsqueda: {e}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
-@app.get("/api/followers")
-async def get_followers(username: str, limit: int = 50, token: str = Depends(verify_token)):
-    """Obtiene los seguidores de un usuario"""
-    try:
-        client = active_sessions[token]
-        user_id = client.user_id_from_username(username)
-        followers = client.user_followers(user_id, amount=limit)
-
-        followers_data = []
-        for follower_id, follower in followers.items():
-            followers_data.append({
-                "user_id": str(follower.pk),
-                "username": follower.username,
-                "full_name": follower.full_name or "",
-                "profile_pic_url": follower.profile_pic_url or ""
-            })
-
-        return {"success": True, "followers": followers_data}
-    except Exception as e:
-        logger.error(f"Error al obtener seguidores: {e}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-
-
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "active_sessions": len(active_sessions)}
+    """Health check endpoint para Railway"""
+    return {
+        "status": "healthy",
+        "active_sessions": len(active_sessions),
+        "environment": "production" if os.getenv("RAILWAY_ENVIRONMENT") else "development"
+    }
 
 
+@app.get("/")
+async def root():
+    """Root endpoint para verificar que el servidor está corriendo"""
+    return {
+        "message": "🚀 Instagram API Backend is running!",
+        "docs_url": "/docs",
+        "health_check": "/api/health"
+    }
+
+
+# CONFIGURACIÓN PARA RAILWAY
 if __name__ == "__main__":
+    # Railway proporciona la variable PORT automáticamente
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+
+    logger.info(f"🚀 Starting server on port {port}")
+    logger.info(f"📚 Documentation available at: /docs")
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port,
+        log_level="info"
+    )
